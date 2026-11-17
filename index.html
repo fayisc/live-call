@@ -87,7 +87,9 @@ button.tile:hover{background:var(--tile-hi)}
 .x:hover{background:var(--tile)}
 .db{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:18px;min-height:0}
 .db label,.db h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:0 0 6px;display:block}
-textarea,input[type=text],input[type=password]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;resize:vertical}
+.fld{margin-top:10px}
+.db label a{color:var(--accent);text-transform:none;letter-spacing:0;margin-left:6px}
+textarea,input[type=text],input[type=password],select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;resize:vertical}
 .hint{color:var(--muted);font-size:12px;margin:6px 0 0}
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{flex:1;padding:8px 4px;font-size:13px}
@@ -155,9 +157,16 @@ textarea,input[type=text],input[type=password]{width:100%;background:var(--bg);b
       <p class="hint">The team only uses shop facts written here or said in the call. They ask you for anything else.</p>
     </section>
     <section>
-      <label for="key">Anthropic API key</label>
-      <input type="password" id="key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
-      <p class="hint">The team runs on your own Claude API key. It is saved only in this browser and sent only to api.anthropic.com. Use a key with a spend limit.</p>
+      <label for="prov">Who powers the team</label>
+      <select id="prov"></select>
+      <p class="hint" id="provHint"></p>
+      <div class="fld" id="fKey"><label for="key">API key <a id="keyLink" target="_blank" rel="noopener"></a></label>
+      <input type="password" id="key" autocomplete="off" spellcheck="false"></div>
+      <div class="fld" id="fModel"><label for="model">Model</label>
+      <input type="text" id="model" list="models" autocomplete="off" spellcheck="false"><datalist id="models"></datalist></div>
+      <div class="fld" id="fBase"><label for="base">API address</label>
+      <input type="text" id="base" placeholder="https://…/v1" autocomplete="off" spellcheck="false"></div>
+      <p class="hint">Keys are saved only in this browser and sent only to the provider you pick.</p>
     </section>
     <section>
       <h3>Discussion length after you speak</h3>
@@ -230,10 +239,76 @@ const save = () => { try { if (S.log.length > 400) S.log = S.log.slice(-400); lo
 
 /* ---------- Claude API (called straight from the browser with the owner's key) ---------- */
 const FAST_MODEL = "claude-haiku-5-5", SEARCH_MODEL = "claude-sonnet-5-5";
-const KEYK = "nrt-anthropic-key";
-let apiKey = "";
-try { apiKey = localStorage.getItem(KEYK) || ""; } catch {}
+const PROVIDERS = {
+  groq: {name: "Groq (free key)", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", keyUrl: "https://console.groq.com/keys",
+    hint: "Free key, no card needed, and fast enough for a live call. No live web search."},
+  openrouter: {name: "OpenRouter (free models)", base: "https://openrouter.ai/api/v1", model: "openrouter/free", keyUrl: "https://openrouter.ai/keys",
+    hint: "Free models are capped at about 50 requests a day, roughly 25 turns. No live web search."},
+  gemini: {name: "Google Gemini (free tier)", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", keyUrl: "https://aistudio.google.com/apikey",
+    hint: "Free tier key from Google AI Studio. No live web search."},
+  free: {name: "No key (free, very slow)", base: "https://text.pollinations.ai/openai", raw: true, model: "openai", noKey: true, gap: 31000, localDirector: true,
+    hint: "A public free service that allows one reply about every 30 seconds, so expect long pauses. No live web search."},
+  kimi: {name: "Kimi (Moonshot)", base: "https://api.moonshot.ai/v1", model: "kimi-latest", keyUrl: "https://platform.moonshot.ai/console/api-keys",
+    hint: "Your Moonshot key. If replies fail straight away, Moonshot is refusing browser calls. No live web search."},
+  custom: {name: "Other (OpenAI-compatible)", base: "", model: "", editBase: true,
+    hint: "Any service with an OpenAI-style chat API that accepts calls from a browser. No live web search."},
+  claude: {name: "Claude (Anthropic)", claude: true, keyUrl: "https://console.anthropic.com/settings/keys",
+    hint: "Paid. The only option with live web search for Research. Use a key with a spend limit."},
+};
+const CFGK = "nrt-llm-v1";
+const cfg = {provider: "", keys: {}, models: {}, bases: {}};
+try {
+  const j = JSON.parse(localStorage.getItem(CFGK) || "null");
+  if (j && typeof j === "object") Object.assign(cfg, j);
+  const old = localStorage.getItem("nrt-anthropic-key");
+  if (old && !cfg.keys.claude) cfg.keys.claude = old;
+} catch {}
+if (!PROVIDERS[cfg.provider]) cfg.provider = cfg.keys.claude ? "claude" : "groq";
+const saveCfg = () => { try { localStorage.setItem(CFGK, JSON.stringify(cfg)); } catch {} };
+const prov = () => PROVIDERS[cfg.provider];
+const provBase = () => String(cfg.bases[cfg.provider] || prov().base || "").trim().replace(/\/+$/, "");
+const provModel = () => String(cfg.models[cfg.provider] || prov().model || "").trim();
+const provKey = () => String(cfg.keys[cfg.provider] || "").trim();
+const provReady = () => prov().claude ? !!provKey() : !!(provBase() && provModel() && (prov().noKey || provKey()));
+const canSearch = () => !!prov().claude && !search.unavailable;
+
+let gate = Promise.resolve(), nextAt = 0;
+function throttle(gap, signal) {
+  const run = gate.then(async () => {
+    const wait = nextAt - Date.now();
+    if (wait > 0) await new Promise(r => { const t = setTimeout(r, wait); if (signal) signal.addEventListener("abort", () => { clearTimeout(t); r(); }, {once: true}); });
+    if (signal && signal.aborted) throw {code: "cancelled"};
+    nextAt = Date.now() + gap;
+  });
+  gate = run.catch(() => {});
+  return run;
+}
+async function chat(prompt, signal) {
+  const pv = prov(), key = provKey();
+  if (!provReady()) throw {code: "no_key"};
+  if (pv.gap) await throttle(pv.gap, signal);
+  const headers = {"content-type": "application/json"};
+  if (key) headers.authorization = "Bearer " + key;
+  let r;
+  try { r = await fetch(provBase() + (pv.raw ? "" : "/chat/completions"), {method: "POST", signal, headers, body: JSON.stringify({model: provModel(), max_tokens: 700, messages: [{role: "user", content: prompt}]})}); }
+  catch { throw {code: signal && signal.aborted ? "cancelled" : "blocked"}; }
+  if (!r.ok) {
+    let msg = "";
+    try { const j = await r.json(); msg = (j.error && (j.error.message || j.error)) || j.message || ""; } catch {}
+    msg = String(typeof msg === "string" ? msg : JSON.stringify(msg)).slice(0, 220);
+    if (r.status === 401 || r.status === 403) throw {code: "bad_key", message: msg};
+    if (r.status === 429 || r.status === 402) throw {code: "rate_limited", message: msg};
+    if (r.status >= 500) throw {code: "upstream_error", message: msg};
+    throw {code: "api_error", message: msg || "HTTP " + r.status};
+  }
+  const j = await r.json();
+  const c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+  const text = String(typeof c === "string" ? c : Array.isArray(c) ? c.map(x => x.text || "").join("") : "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  if (!text) throw {code: "empty_completion"};
+  return {text};
+}
 async function api(body, signal, beta) {
+  const apiKey = String(cfg.keys.claude || "").trim();
   if (!apiKey) throw {code: "no_key"};
   const headers = {"content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"};
   if (beta) headers["anthropic-beta"] = beta;
@@ -253,6 +328,7 @@ async function api(body, signal, beta) {
 }
 const textOf = m => (m.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
 async function sample(prompt, o) {
+  if (!prov().claude) return chat(prompt, o && o.signal);
   const m = await api({model: FAST_MODEL, max_tokens: 400, thinking: {type: "disabled"}, messages: [{role: "user", content: prompt}]}, o && o.signal);
   if (m.stop_reason === "refusal") throw {code: "refused"};
   const text = textOf(m);
@@ -546,7 +622,7 @@ function tail(max) {
 const lastSpeaker = () => { for (let i = S.log.length - 1; i >= 0; i--) if (BY[S.log[i].who]) return S.log[i].who; return null; };
 function searchLine() {
   if (search.state === "running") return 'A web search is running now for: "' + search.q + '". Results are not in yet.';
-  if (search.unavailable) return "Web search is NOT available in this call.";
+  if (!canSearch()) return "Web search is NOT available in this call.";
   return "No web search is running.";
 }
 function directorPrompt(remaining) {
@@ -613,22 +689,31 @@ function clean(a, text) {
   return s;
 }
 const COPY = {
-  no_key: "Add your Anthropic API key in the call record so the team can reply.",
-  bad_key: "Claude rejected that API key. Check it in the call record.",
-  rate_limited: "Claude is rate limited right now. Wait a little, then speak or press Let them continue.",
-  refused: "Claude declined that one. Try saying it another way.",
+  no_key: "Finish the setup in the call record (provider, key and model) so the team can reply.",
+  bad_key: "That API key was rejected. Check it in the call record.",
+  rate_limited: "This provider's limit was reached. Wait a little, or switch provider in the call record.",
+  blocked: "The provider couldn't be reached from the browser. It may be blocking browser calls; try another provider in the call record.",
+  refused: "The model declined that one. Try saying it another way.",
   prompt_too_large: "The call record is too long for one reply. Start a fresh call from the drawer.",
 };
 const copyFor = c => COPY[c] || "The team lost its connection for a moment. Speak again or press Let them continue.";
 
 /* ---------- director + speaker generation ---------- */
+const TOPICS = {ads: /\bads?\b|budget|google ads|meta|campaign/i, seo: /seo|search|maps|keyword|google business/i, social: /instagram|tiktok|snap|social|whatsapp/i,
+  email: /email|newsletter|offer|repeat/i, analytics: /analytics|ga4|pixel|measure|track/i, cro: /button|layout|checkout|convert|mobile|trust/i,
+  auto: /shopify|woocommerce|wix|domain|payment|platform|gateway/i, copy: /copy|arabic|headline|slogan|wording|text|write/i, research: /research|competitor|find out/i};
 function fallbackPlan() {
-  const last = lastSpeaker();
+  const last = lastSpeaker(), lastEntry = S.log[S.log.length - 1];
   if (!S.log.length) return {speaker: "strategy", mode: "ask_owner"};
+  if (lastEntry && lastEntry.who === "you") {
+    const hit = Object.keys(TOPICS).find(id => TOPICS[id].test(lastEntry.text));
+    return {speaker: hit || "strategy", mode: "answer"};
+  }
   const pool = AGENTS.filter(a => a.id !== last);
   return {speaker: pool[Math.floor(Math.random() * pool.length)].id, mode: last ? "build" : "answer", target: last};
 }
 async function direct(sm, remaining) {
+  if (prov().localDirector) { const f = fallbackPlan(); if (remaining <= 1) { f.speaker = lastSpeaker() === "strategy" ? f.speaker : "strategy"; f.mode = "summarize"; } return f; }
   let j;
   try { j = await sm.json(directorPrompt(remaining), {modelTier: "quick", cache: false, signal: ctl.signal}); }
   catch (e) {
@@ -656,7 +741,7 @@ async function prepare(ep, forced, remaining) {
     else plan = await direct(sm, remaining);
     if (ep !== epoch) return null;
     const a = BY[plan.speaker];
-    if (plan.search && search.state !== "running" && !search.unavailable) startSearch(plan.search);
+    if (plan.search && search.state !== "running" && canSearch()) startSearch(plan.search);
     hands = new Set((plan.hands || []).filter(h => h !== a.id && h !== speaking));
     if (plan.mode !== "interrupt") hands.add(a.id);
     if (research.pending && a.id !== "research") hands.add("research");
@@ -671,7 +756,7 @@ async function prepare(ep, forced, remaining) {
   } catch (e) {
     if (ep !== epoch || (e && e.code === "cancelled")) return null;
     if (e && (e.code === "no_key" || e.code === "bad_key")) { openDrawer(false); setTimeout(() => $("key").focus(), 220); }
-    return {error: e && e.code === "api_error" ? "The Claude API said: " + e.message : copyFor(e && e.code)};
+    return {error: e && e.code === "api_error" ? "The provider said: " + e.message : copyFor(e && e.code)};
   }
 }
 async function run(forced) {
@@ -772,6 +857,7 @@ async function finishListening(send) {
 /* ---------- live web search (Claude's web search tool) ---------- */
 const SEARCH_FAIL = {
   no_key: "there is no API key yet",
+  no_search: "live web search only works when Claude powers the team",
   bad_key: "the API key was rejected",
   rate_limited: "the API is rate limited right now",
   refused: "the search request was declined",
@@ -788,6 +874,7 @@ async function startSearch(q) {
   const tok = ++search.tok;
   search.state = "running"; search.q = q; search.fail = ""; renderTiles();
   try {
+    if (!prov().claude) throw {code: "no_search"};
     const prompt = "Research question: " + q + "\n\n" +
       "Context: a shop owner in Qatar is planning a website for a shop called New Rayyan Trading on Al Shafi Street. Search the web for current, specific information that answers the question. Do not guess facts about that shop.\n\n" +
       "Reply with up to 6 bullet findings, each naming its source, 150 words maximum in total, and nothing else. If the search finds nothing useful, say so in one line.";
@@ -849,8 +936,40 @@ $("bLeave").onclick = () => { interruptAll(); if (L) finishListening(false); sea
 $("bRejoin").onclick = () => { left = false; $("gone").hidden = true; setStatus(); };
 $("bFresh2").onclick = () => { left = false; $("gone").hidden = true; freshCall(); };
 $("form").onsubmit = e => { e.preventDefault(); const v = $("say").value; $("say").value = ""; handleUser(v); };
-$("key").value = apiKey;
-$("key").oninput = e => { apiKey = e.target.value.trim(); try { localStorage.setItem(KEYK, apiKey); } catch {} };
+for (const id of Object.keys(PROVIDERS)) { const o = document.createElement("option"); o.value = id; o.textContent = PROVIDERS[id].name; $("prov").append(o); }
+let modelsFor = "";
+async function loadModels() {
+  const pv = prov(), tag = cfg.provider + "|" + provKey() + "|" + provBase();
+  if (pv.claude || pv.raw || !provBase() || (!pv.noKey && !provKey()) || modelsFor === tag) return;
+  modelsFor = tag; $("models").textContent = "";
+  try {
+    const r = await fetch(provBase() + "/models", {headers: provKey() ? {authorization: "Bearer " + provKey()} : {}});
+    if (!r.ok || modelsFor !== tag) return;
+    const j = await r.json();
+    for (const m of (j.data || []).slice(0, 400)) if (m && m.id) { const o = document.createElement("option"); o.value = String(m.id).replace(/^models\//, ""); $("models").append(o); }
+  } catch {}
+}
+function renderProv() {
+  const pv = prov();
+  $("prov").value = cfg.provider;
+  $("provHint").textContent = pv.hint;
+  $("fKey").hidden = !!pv.noKey;
+  $("fModel").hidden = !!pv.claude;
+  $("fBase").hidden = !pv.editBase;
+  $("key").value = cfg.keys[cfg.provider] || "";
+  $("model").value = provModel();
+  $("base").value = cfg.bases[cfg.provider] || "";
+  $("keyLink").hidden = !pv.keyUrl;
+  if (pv.keyUrl) { $("keyLink").href = pv.keyUrl; $("keyLink").textContent = pv.claude ? "Get a key" : "Get a free key"; }
+  loadModels();
+}
+$("prov").onchange = e => { cfg.provider = e.target.value; saveCfg(); renderProv(); renderTiles(); };
+$("key").oninput = e => { cfg.keys[cfg.provider] = e.target.value.trim(); saveCfg(); };
+$("key").onchange = loadModels;
+$("model").oninput = e => { cfg.models[cfg.provider] = e.target.value.trim(); saveCfg(); };
+$("base").oninput = e => { cfg.bases[cfg.provider] = e.target.value.trim(); saveCfg(); };
+$("base").onchange = loadModels;
+renderProv();
 $("brief").value = S.brief;
 $("brief").oninput = e => { S.brief = e.target.value; save(); };
 $("seg").onclick = e => { const n = Number(e.target.dataset && e.target.dataset.n); if (n) { S.len = n; save(); renderControls(); } };
@@ -884,7 +1003,7 @@ P.dict.then(d => {
 });
 Promise.all([P.tts, P.dict, P.sample]).then(([t, d, s]) => {
   capsKnown = true; renderControls(); setStatus();
-  if (!apiKey) { toast("Add your Anthropic API key in the call record to start the meeting.", 12000); openDrawer(false); }
+  if (!provReady()) { toast("Pick who powers the team and add a key in the call record to start the meeting.", 12000); openDrawer(false); }
   else if (!d) toast("Voice input isn't available in this browser or app. Open the call record to type; replies show as captions" + (t ? " and are spoken." : "."), 12000);
 });
 })();
