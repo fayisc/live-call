@@ -1,0 +1,799 @@
+<title>New Rayyan Team Call</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen call app. Header strip, 12-tile grid that fills the stage, captions floating over the grid, control bar pinned below, record drawer sliding in from the right. Single dark look by choice (a video-call room). */
+:root{
+  color-scheme:dark;
+  --bg:#17181b; --stage:#17181b; --tile:#2b2d31; --tile-hi:#34373c; --bar:#1f2023;
+  --fg:#e8eaed; --muted:#9aa0a6; --line:#3c4043;
+  --accent:#8ab4f8; --accent-ink:#10233f; --danger:#ea4335; --live:#81c995; --warn:#fdd663;
+  --font:"Roboto","Noto Sans Arabic",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:12px;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.45;overflow:hidden}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:flex;flex-direction:column;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+.top{display:flex;align-items:center;gap:12px;padding-block:10px;min-height:44px}
+.top h1{font-size:16px;font-weight:500;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.top .clock{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.top .status{margin-left:auto;color:var(--muted);font-size:13px;text-align:right;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .status b{color:var(--fg);font-weight:500}
+@media (max-width:520px){.top .clock{display:none}.top h1{font-size:14px}}
+
+.stage{flex:1;min-height:0;position:relative}
+.grid{height:100%;display:grid;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:minmax(0,1fr)}
+@media (min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}}
+.tile{position:relative;background:var(--tile);border-radius:var(--r);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;min-height:0;overflow:hidden;border:2px solid transparent;transition:border-color .15s,background .15s;padding:4px}
+button.tile:hover{background:var(--tile-hi)}
+.tile.speaking{border-color:var(--accent)}
+.tile.target{border-color:var(--warn);border-style:dashed}
+.av{width:clamp(38px,9vmin,84px);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-weight:500;font-size:clamp(14px,3.2vmin,28px);color:#1b1b1f;flex:none;position:relative}
+.tile.speaking .av::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--accent);animation:pulse 1.2s ease-out infinite}
+@keyframes pulse{from{opacity:.9;transform:scale(.92)}to{opacity:0;transform:scale(1.25)}}
+.nm{position:absolute;left:8px;bottom:6px;right:8px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;text-shadow:0 1px 2px #0008}
+.nm small{color:var(--muted);font-weight:400;display:none}
+@media (min-width:900px){.nm small{display:inline}}
+.hand{position:absolute;top:6px;left:8px;font-size:18px;line-height:1}
+.badge{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:var(--accent);display:grid;place-items:center}
+.bars{display:flex;gap:2px;align-items:center;height:12px}
+.bars i{width:3px;background:var(--accent-ink);border-radius:2px;animation:bar .7s ease-in-out infinite alternate}
+.bars i:nth-child(1){height:5px}.bars i:nth-child(2){height:11px;animation-delay:.15s}.bars i:nth-child(3){height:7px;animation-delay:.3s}
+@keyframes bar{to{transform:scaleY(.35)}}
+.chip{font-size:11px;color:var(--warn);background:#0006;border-radius:99px;padding:2px 8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip.think{color:var(--muted)}
+.tile.me .av{background:var(--line);color:var(--fg)}
+.tile.me.live{border-color:var(--danger)}
+
+.cap{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;width:min(720px,100%);background:#000c;border-radius:10px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+.cap .dot{width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:11px;font-weight:500;color:#1b1b1f}
+.cap .who{font-size:12px;color:var(--muted)}
+.cap .line{font-size:clamp(15px,2.4vmin,19px);line-height:1.35;overflow-wrap:anywhere}
+.cap .body{min-width:0}
+.toast{position:absolute;left:50%;transform:translateX(-50%);top:8px;max-width:min(560px,100%);background:var(--tile-hi);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;text-align:center}
+
+.bar{display:flex;align-items:center;justify-content:center;gap:10px;padding-block:12px;flex-wrap:nowrap}
+.cb{width:44px;height:44px;border-radius:50%;background:var(--tile);display:grid;place-items:center;flex:none;position:relative}
+.cb:hover{background:var(--tile-hi)}
+.cb svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cb.off{background:#5c2b29;color:#f6aea9}
+.cb.off::after{content:"";position:absolute;width:26px;height:2px;background:currentColor;transform:rotate(-45deg);border-radius:2px}
+.cb.wide{width:auto;border-radius:22px;padding:0 14px;display:flex;gap:8px;font-weight:500}
+.cb.wide span{display:none}
+@media (min-width:640px){.cb.wide span{display:inline}}
+.cb.leave{background:var(--danger);color:#fff;width:56px;border-radius:22px}
+.cb.leave svg{fill:currentColor;stroke:none}
+.mic{width:64px;height:64px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;flex:none;position:relative}
+.mic svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.mic.live{background:var(--danger);color:#fff}
+.mic.live::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--danger);animation:pulse 1.1s ease-out infinite}
+.cb[disabled]{opacity:.45;cursor:default}
+
+.scrim{position:fixed;inset:0;background:#0008;z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100%);background:var(--bar);z-index:21;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s;border-left:1px solid var(--line);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);visibility:hidden}
+.drawer.open{transform:none;visibility:visible}
+.dh{display:flex;align-items:center;padding:12px 16px;gap:8px;border-bottom:1px solid var(--line)}
+.dh h2{font-size:16px;font-weight:500;margin:0;flex:1}
+.x{width:36px;height:36px;border-radius:50%;font-size:20px;line-height:1}
+.x:hover{background:var(--tile)}
+.db{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:18px;min-height:0}
+.db label,.db h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:0 0 6px;display:block}
+textarea,input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;resize:vertical}
+.hint{color:var(--muted);font-size:12px;margin:6px 0 0}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;padding:8px 4px;font-size:13px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);font-weight:500}
+.log{display:flex;flex-direction:column;gap:12px}
+.en{display:grid;grid-template-columns:10px minmax(0,1fr);gap:4px 8px;align-items:baseline}
+.en .d{width:8px;height:8px;border-radius:50%;margin-top:6px;align-self:start}
+.en .h{font-weight:500;font-size:13px}
+.en .h time{color:var(--muted);font-weight:400;margin-left:6px;font-variant-numeric:tabular-nums;font-size:12px}
+.en .h em{color:var(--warn);font-style:normal;font-weight:400;font-size:12px;margin-left:6px}
+.en p{grid-column:2;margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.en.note p{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+.empty{color:var(--muted)}
+.btn{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-weight:500;text-align:center}
+.btn:hover{background:var(--tile)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.warn{color:#f6aea9}
+.df{border-top:1px solid var(--line);padding:10px 16px;display:flex;flex-direction:column;gap:6px}
+.df form{display:flex;gap:8px}
+.df input{flex:1;min-width:0}
+.to{font-size:12px;color:var(--warn)}
+.gone{position:fixed;inset:0;z-index:30;background:var(--bg);display:grid;place-items:center;padding:24px;text-align:center}
+.gone div{display:flex;flex-direction:column;gap:12px;max-width:320px}
+.gone h2{font-weight:400;font-size:24px;margin:0 0 8px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>New Rayyan Trading website</h1>
+    <span class="clock" id="clock"></span>
+    <span class="status" id="status"></span>
+  </header>
+
+  <main class="stage">
+    <div class="grid" id="grid"></div>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="cap" id="cap" aria-live="polite" hidden>
+      <span class="dot" id="capDot"></span>
+      <div class="body"><div class="who" id="capWho"></div><div class="line" id="capLine" dir="auto"></div></div>
+    </div>
+  </main>
+
+  <nav class="bar" aria-label="Call controls">
+    <button class="cb" id="bAudio" title="Team audio" aria-label="Team audio"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <button class="cb" id="bCap" title="Captions" aria-label="Captions"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10.5 10.5a2 2 0 1 0 0 3M16.5 10.5a2 2 0 1 0 0 3"/></svg></button>
+    <button class="mic" id="bMic" title="Tap to talk. On a laptop, hold Space." aria-label="Microphone"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+    <button class="cb wide" id="bGo" title="Let them continue" aria-label="Let them continue"><svg viewBox="0 0 24 24"><path d="M5 6l6 6-6 6zM13 6l6 6-6 6z"/></svg><span>Let them continue</span></button>
+    <button class="cb" id="bRec" title="Call record" aria-label="Call record"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+    <button class="cb leave" id="bLeave" title="Leave call" aria-label="Leave call"><svg viewBox="0 0 24 24"><path d="M2.5 14.5c5.2-5.3 13.8-5.3 19 0l-2.6 2.6-3.4-1.6v-2.7a10 10 0 0 0-7 0v2.7l-3.4 1.6z"/></svg></button>
+  </nav>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Call record">
+  <div class="dh"><h2>Call record</h2><button class="x" id="bClose" aria-label="Close">×</button></div>
+  <div class="db">
+    <section>
+      <label for="brief">Project brief</label>
+      <textarea id="brief" rows="5"></textarea>
+      <p class="hint">The team only uses shop facts written here or said in the call. They ask you for anything else.</p>
+    </section>
+    <section>
+      <h3>Discussion length after you speak</h3>
+      <div class="seg" id="seg">
+        <button data-n="3">Short · 3</button><button data-n="6">Normal · 6</button><button data-n="12">Long · 12</button>
+      </div>
+    </section>
+    <section>
+      <h3>Everything said</h3>
+      <div class="log" id="log"></div>
+    </section>
+    <button class="btn warn" id="bFresh">Start a fresh call</button>
+  </div>
+  <div class="df">
+    <div class="to" id="to" hidden></div>
+    <form id="form"><input type="text" id="say" placeholder="Type to the team" autocomplete="off" aria-label="Type to the team"><button class="btn primary" type="submit">Send</button></form>
+  </div>
+</aside>
+
+<div class="gone" id="gone" hidden>
+  <div>
+    <h2>You left the call</h2>
+    <button class="btn primary" id="bRejoin">Rejoin</button>
+    <button class="btn" id="bFresh2">Start a fresh call</button>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const TITLE = "New Rayyan Trading website";
+const SERVER = "Claude Code Remote";
+const DEFAULT_BRIEF = "We are creating a website for my shop: New Rayyan Trading, on Al Shafi Street, Qatar.\n\n(Add what the shop sells, who buys from it, and what the website should do.)";
+
+const AGENTS = [
+  {id:"intern", name:"Intern", ini:"In", color:"#fdd663", voice:"airy", rate:1.12, role:"Generalist", al:["intern"],
+   p:"You are the eager intern: a generalist who volunteers for the grunt work and asks naive but genuinely useful questions that experts forget to ask."},
+  {id:"strategy", name:"Strategy", ini:"St", color:"#8ab4f8", voice:"buttery", rate:1, role:"Chair", al:["strategy","strategist"],
+   p:"You chair the meeting. You sum up, cut through noise, and turn debate into clear decisions and next steps."},
+  {id:"ads", name:"Paid Ads", ini:"Ad", color:"#f28b82", voice:"glassy", rate:1.08, role:"Google, Meta, Snap, TikTok", al:["paid ads","paid ad","ads"],
+   p:"You run paid ads in Qatar on Google, Meta, Snapchat and TikTok. You think in budgets, targeting and cost per lead, and you dislike spending before tracking is ready."},
+  {id:"seo", name:"SEO", ini:"SE", color:"#81c995", voice:"rounded", rate:1, role:"Local search", al:["seo","s\\.? ?e\\.? ?o\\.?"],
+   p:"You do local SEO: Google Business Profile, Maps, and Arabic plus English keywords. You believe free local visibility should come before paid traffic."},
+  {id:"social", name:"Social Media", ini:"So", color:"#ff8bcb", voice:"airy", rate:1, role:"Instagram, TikTok, Snap", al:["social media","social"],
+   p:"You handle Instagram, TikTok, Snapchat and WhatsApp Business. You care about what people in Qatar actually watch and share."},
+  {id:"research", name:"Research", ini:"Re", color:"#78d9ec", voice:"glassy", rate:0.95, role:"Live web search", al:["research","researcher"],
+   p:"You are the researcher and the ONLY person in the meeting who can search the internet. You are careful about sources and you never present a guess as a finding."},
+  {id:"email", name:"Email", ini:"Em", color:"#fcad70", voice:"buttery", rate:1.1, role:"Email and WhatsApp", al:["email","e-mail"],
+   p:"You own email and WhatsApp messaging: offers, follow-ups and getting buyers to come back."},
+  {id:"analytics", name:"Analytics", ini:"An", color:"#c58af9", voice:"rounded", rate:1.1, role:"GA4, Meta pixel", al:["analytics","analyst"],
+   p:"You set up GA4 and the Meta pixel and decide what to measure. You push back on any plan that cannot be measured."},
+  {id:"cro", name:"CRO", ini:"CR", color:"#a8dab5", voice:"airy", rate:0.92, role:"Conversion", al:["cro","c\\.? ?r\\.? ?o\\.?","conversion"],
+   p:"You optimise conversion: layout, call-to-action buttons, WhatsApp and call buttons, trust signals, mobile and checkout. You argue for fewer steps and bigger buttons."},
+  {id:"auto", name:"Automation", ini:"Au", color:"#aecbfa", voice:"rounded", rate:0.92, role:"Platform and payments", al:["automation"],
+   p:"You choose the platform (Shopify, WooCommerce or Wix), the .qa domain, payment gateways and integrations. You favour the simplest setup the owner can run alone."},
+  {id:"copy", name:"Copywriter", ini:"Co", color:"#e6c9a8", voice:"buttery", rate:0.92, role:"English and Arabic", al:["copywriter","copy writer","copy"],
+   p:"You are a bilingual English and Arabic copywriter. You write actual lines, not advice about lines, and often give the line in both languages."},
+];
+const BY = Object.fromEntries(AGENTS.map(a => [a.id, a]));
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- saved state ---------- */
+const KEY = "nrt-live-call-v1";
+const S = {brief: DEFAULT_BRIEF, len: 6, audio: true, captions: true, log: []};
+try { const j = JSON.parse(localStorage.getItem(KEY) || "null"); if (j && typeof j === "object") Object.assign(S, j); } catch {}
+if (!Array.isArray(S.log)) S.log = [];
+if (![3, 6, 12].includes(S.len)) S.len = 6;
+const save = () => { try { if (S.log.length > 400) S.log = S.log.slice(-400); localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+
+/* ---------- capabilities ---------- */
+const use = n => (window.claude && window.claude.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null));
+const P = {sample: use("sample"), tts: use("tts"), dict: use("dictation"), mcp: use("mcp")};
+let tts = null, dict = null, ttsOff = false, micDenied = false, capsKnown = false;
+
+/* ---------- meeting state ---------- */
+let epoch = 0, ctl = new AbortController(), busy = false, left = false;
+let turnsLeft = 0, speaking = null, thinking = null, target = null;
+let hands = new Set();
+let curPlay = null, playTok = 0, L = null, pttDown = false;
+const search = {state: "idle", tok: 0, q: "", unavailable: false, fail: ""};
+const research = {pending: null};
+
+/* ---------- rendering ---------- */
+function buildTiles() {
+  const g = $("grid");
+  const me = document.createElement("div");
+  me.className = "tile me"; me.id = "t-you";
+  me.innerHTML = '<span class="av">You</span><span class="chip" hidden></span><span class="nm">You</span>';
+  g.append(me);
+  for (const a of AGENTS) {
+    const b = document.createElement("button");
+    b.className = "tile"; b.id = "t-" + a.id; b.type = "button";
+    b.title = "Tap to ask " + a.name + " first";
+    b.innerHTML = '<span class="hand" hidden>✋</span><span class="badge" hidden><span class="bars"><i></i><i></i><i></i></span></span>' +
+      '<span class="av" style="background:' + a.color + '">' + a.ini + '</span><span class="chip" hidden></span>' +
+      '<span class="nm">' + a.name + ' <small>· ' + a.role + '</small></span>';
+    b.onclick = () => { target = target === a.id ? null : a.id; renderTiles(); toast(target ? "Your next words go to " + a.name + " first." : "", 3000); };
+    g.append(b);
+  }
+}
+function renderTiles() {
+  for (const a of AGENTS) {
+    const t = $("t-" + a.id), sp = speaking === a.id;
+    t.classList.toggle("speaking", sp);
+    t.classList.toggle("target", target === a.id);
+    t.setAttribute("aria-pressed", target === a.id);
+    t.querySelector(".badge").hidden = !sp;
+    t.querySelector(".hand").hidden = !hands.has(a.id) || sp;
+    const chip = t.querySelector(".chip");
+    let txt = "";
+    if (a.id === "research" && search.state === "running") txt = "Searching web…";
+    else if (thinking === a.id && !sp) txt = "…";
+    chip.textContent = txt; chip.hidden = !txt;
+    chip.classList.toggle("think", txt === "…");
+  }
+  const me = $("t-you"), chip = me.querySelector(".chip");
+  me.classList.toggle("live", !!L);
+  chip.textContent = L ? "Listening…" : ""; chip.hidden = !L;
+  const to = $("to");
+  to.hidden = !target; to.textContent = target ? "To " + BY[target].name + " first" : "";
+}
+function setStatus() {
+  let h;
+  if (left) h = "";
+  else if (L) h = "<b>Listening</b> · pause to send";
+  else if (busy) {
+    const n = Math.max(turnsLeft, 0);
+    const who = speaking ? BY[speaking].name + " speaking" : thinking ? BY[thinking].name + " thinking" : "Team discussing";
+    h = "<b>" + who + "</b>" + (n ? " · " + n + " more" : "");
+  } else h = capsKnown && !dict ? "<b>Your turn</b> · type in the record" : "<b>Your turn</b> · tap the mic";
+  $("status").innerHTML = h;
+  $("bMic").classList.toggle("live", !!L);
+}
+function caption(who, text) {
+  const cap = $("cap");
+  const show = !!text && (S.captions || !tts || ttsOff || !S.audio || who === "you");
+  cap.hidden = !show;
+  if (!show) return;
+  const a = BY[who];
+  $("capDot").textContent = a ? a.ini : "You";
+  $("capDot").style.background = a ? a.color : "#9aa0a6";
+  $("capWho").textContent = a ? a.name : "You";
+  $("capLine").textContent = text;
+}
+let toastT = 0;
+function toast(text, ms) {
+  const t = $("toast"); clearTimeout(toastT);
+  t.textContent = text || ""; t.hidden = !text;
+  if (text) toastT = setTimeout(() => { t.hidden = true; }, ms || 7000);
+}
+const hhmm = t => { const d = new Date(t); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+function renderLog() {
+  const box = $("log"); box.textContent = "";
+  if (!S.log.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "Nothing said yet. Tap the mic, or press Let them continue and Strategy opens the meeting."; box.append(p); return; }
+  for (const e of S.log) {
+    const a = BY[e.who], d = document.createElement("div");
+    d.className = "en" + (e.who === "note" ? " note" : "");
+    const dot = document.createElement("span"); dot.className = "d";
+    dot.style.background = a ? a.color : e.who === "note" ? "#78d9ec" : "#e8eaed";
+    const h = document.createElement("div"); h.className = "h";
+    h.textContent = a ? a.name : e.who === "note" ? "Web search" : "You";
+    const tm = document.createElement("time"); tm.textContent = hhmm(e.t); h.append(tm);
+    if (e.cut) { const em = document.createElement("em"); em.textContent = "(interrupted)"; h.append(em); }
+    const p = document.createElement("p"); p.dir = "auto"; p.textContent = e.text;
+    d.append(dot, h, p); box.append(d);
+  }
+  const db = box.closest(".db"); if ($("drawer").classList.contains("open")) db.scrollTop = db.scrollHeight;
+}
+function addEntry(e) { e.t = Date.now(); S.log.push(e); save(); renderLog(); return e; }
+function renderControls() {
+  const noVoice = !tts || ttsOff;
+  $("bAudio").classList.toggle("off", !S.audio || (capsKnown && noVoice));
+  $("bAudio").title = capsKnown && noVoice ? "Voices aren't available here, so replies show as captions" : S.audio ? "Mute the team" : "Unmute the team";
+  $("bCap").classList.toggle("off", !S.captions);
+  $("bMic").title = capsKnown && (!dict || micDenied) ? "The mic isn't available here. Tap to type instead." : "Tap to talk. On a laptop, hold Space.";
+  for (const b of $("seg").children) b.setAttribute("aria-pressed", Number(b.dataset.n) === S.len);
+}
+function openDrawer(focusSay) {
+  $("drawer").classList.add("open"); $("scrim").hidden = false; renderLog();
+  if (focusSay) setTimeout(() => $("say").focus(), 220);
+}
+function closeDrawer() { $("drawer").classList.remove("open"); $("scrim").hidden = true; }
+
+/* ---------- speech out ---------- */
+function splitLines(text) {
+  let parts;
+  try { parts = text.split(new RegExp("(?<=[.!?؟…])\\s+")); } catch { parts = [text]; }
+  const out = [];
+  for (const s of parts.map(x => x.trim()).filter(Boolean)) {
+    if (out.length && (s.length < 12 || out[out.length - 1].length < 12)) out[out.length - 1] += " " + s; else out.push(s);
+  }
+  return out.slice(0, 5).map(s => s.slice(0, 1900));
+}
+function silentFrom(p, i) {
+  p.mode = "silent";
+  const step = k => {
+    if (p.done) return;
+    if (k >= p.turn.lines.length) return p.finish(false, k);
+    if (p.cutWanted && k >= 1) return p.finish(true, k);
+    p.idx = k; caption(p.turn.a.id, p.turn.lines[k]);
+    p.timer = setTimeout(() => step(k + 1), Math.max(1500, p.turn.lines[k].length * 62));
+  };
+  step(i);
+}
+function playTurn(turn) {
+  return new Promise(res => {
+    const p = {turn, tok: ++playTok, idx: -1, done: false, timer: 0, cutWanted: false, mode: "",
+      finish(interrupted, count) {
+        if (p.done) return; p.done = true; clearTimeout(p.timer);
+        if (p.mode === "tts" && interrupted && tts) tts.stop().catch(() => {});
+        if (curPlay === p) curPlay = null;
+        res({interrupted, count});
+      }};
+    curPlay = p;
+    if (tts && S.audio && !ttsOff) {
+      p.mode = "tts";
+      caption(turn.a.id, turn.lines[0]);
+      tts.speak(turn.lines.map((text, i) => ({text, voice: turn.a.voice, rate: turn.a.rate, id: p.tok + ":" + i})))
+        .then(() => p.finish(false, turn.lines.length), e => {
+          if (p.done) return;
+          const c = e && e.code;
+          if (c === "busy") return p.finish(false, p.idx + 1);
+          if (c === "not_granted" || c === "unavailable") { ttsOff = true; renderControls(); }
+          else if (c === "stopped" && e.reason === "viewer_stopped") { S.audio = false; save(); renderControls(); }
+          else if (c === "no_gesture") toast("Tap anywhere on the page to hear the team. Captions are on meanwhile.");
+          else if (c === "rate_limited") toast("Voices are rate limited for a moment. Captions carry on.");
+          silentFrom(p, p.idx + 1);
+        });
+    } else silentFrom(p, 0);
+  });
+}
+function onTtsLine(e) {
+  const p = curPlay; if (!p || p.done || !e || typeof e.id !== "string") return;
+  const [tok, i] = e.id.split(":").map(Number);
+  if (tok !== p.tok) return;
+  if (p.cutWanted && i >= 1) return p.finish(true, i);
+  p.idx = i; caption(p.turn.a.id, p.turn.lines[i]);
+}
+function requestCut(turn) {
+  const p = curPlay;
+  if (!p || p.done || p.turn !== turn || turn.lines.length < 2) return;
+  if (p.idx >= 1) p.finish(true, p.idx + 1); else p.cutWanted = true;
+}
+
+/* ---------- interrupt everything ---------- */
+function interruptAll() {
+  epoch++;
+  ctl.abort(); ctl = new AbortController();
+  if (curPlay) curPlay.finish(true, Math.max(1, curPlay.idx + 1));
+  else if (tts) tts.stop().catch(() => {});
+  busy = false; speaking = null; thinking = null; hands = new Set();
+  if (research.pending) hands.add("research");
+  caption(null, ""); renderTiles(); setStatus();
+}
+
+/* ---------- prompts ---------- */
+function tail(max) {
+  const rows = S.log.slice(-max).map(e => {
+    if (e.who === "you") return "Owner: " + e.text;
+    if (e.who === "note") return "[WEB SEARCH NOTE] " + e.text;
+    return BY[e.who].name + ": " + e.text + (e.cut ? " (interrupted)" : "");
+  });
+  let s = rows.join("\n");
+  if (s.length > 14000) s = s.slice(-14000);
+  return s || "(nothing has been said yet)";
+}
+const lastSpeaker = () => { for (let i = S.log.length - 1; i >= 0; i--) if (BY[S.log[i].who]) return S.log[i].who; return null; };
+function searchLine() {
+  if (search.state === "running") return 'A web search is running now for: "' + search.q + '". Results are not in yet.';
+  if (search.unavailable) return "Web search is NOT available in this call.";
+  return "No web search is running.";
+}
+function directorPrompt(remaining) {
+  const last = S.log[S.log.length - 1];
+  return [
+    "You are the hidden director of a live voice meeting called \"" + TITLE + "\". A shop owner is talking with 11 AI specialists. You never speak. You only choose who talks next.",
+    "Specialists (id: role):\n" + AGENTS.map(a => a.id + ": " + a.name + " — " + a.p).join("\n"),
+    "Owner's brief:\n" + S.brief.slice(0, 3000),
+    "Transcript (latest last):\n" + tail(16),
+    "State: " + remaining + " team turn(s) left before the floor returns to the owner, counting the one you are choosing. " + searchLine() +
+      (last && BY[last.who] ? " " + BY[last.who].name + " is speaking right now." : " The owner spoke last."),
+    "Choose the next speaker so it sounds like a real meeting: the most relevant specialist answers the owner first, then others build on it, disagree by name, or occasionally cut in. Rules:\n" +
+    "- Never pick the person who spoke last. Spread turns around; do not let two people ping-pong.\n" +
+    "- mode is one of: answer (reply to the owner), build (add to a colleague), disagree (push back on a colleague by name), interrupt (cut off the person speaking right now; use it about one turn in five, and only when a specialist is speaking), ask_owner (ask the owner one question about the shop), summarize.\n" +
+    "- target is the colleague being built on, disagreed with or interrupted, else null.\n" +
+    "- The team knows NOTHING about the shop beyond the brief and what the owner said. When shop facts are missing (what it sells, prices, customers), use ask_owner early instead of letting people guess.\n" +
+    "- hands: up to 3 other ids who visibly want to speak next.\n" +
+    "- search: a short web search query when live outside facts would really help (competitors, platform fees, Qatar regulations, payment gateways, ad costs) and no search is running and search is available; otherwise null. Only Research can search. Do not search for facts about the owner's own shop.\n" +
+    "- handback: true when the team needs the owner's answer or the discussion has reached a natural stop. On the last turn pick strategy with summarize, or ask_owner.\n" +
+    "- If nothing has been said yet, pick strategy with ask_owner to open the meeting.",
+    'Reply with only one JSON object, for example: {"speaker":"seo","mode":"build","target":"strategy","hands":["ads","cro"],"search":null,"handback":false}',
+  ].join("\n\n");
+}
+const MODES = ["answer", "build", "disagree", "interrupt", "ask_owner", "summarize"];
+function modeLine(a, plan, handback) {
+  const t = plan.target && BY[plan.target] && plan.target !== a.id ? BY[plan.target].name : null;
+  const who = t || "the last speaker";
+  let s;
+  switch (plan.mode) {
+    case "build": s = "Build on what " + who + " just said. Use their name and add one concrete thing from your own specialty."; break;
+    case "disagree": s = "Disagree with " + who + ", by name. Be friendly but firm, say why, and say what you would do instead."; break;
+    case "interrupt": s = "You are cutting " + who + " off mid-sentence. Open with a quick interjection using their name, then make your point fast in one or two sentences."; break;
+    case "ask_owner": s = "Ask the owner ONE specific question about the shop that the team needs answered to move on. End on the question."; break;
+    case "summarize": s = "Sum up where the team has landed, name any decision or open disagreement, and hand back to the owner."; break;
+    case "report": s = "New web findings have just arrived (the latest WEB SEARCH NOTE in the transcript). Report the two or three most useful findings out loud and name the source of each. Do not add anything that is not in the note."; break;
+    case "search_failed": s = "Your web search just failed (" + (search.fail || "it did not come back") + "). Say so plainly in one sentence, then carry on from what you already know, and flag it as unverified."; break;
+    default: s = "Answer what the owner just said, from your own specialty. Take a clear position.";
+  }
+  if (handback && plan.mode !== "ask_owner" && plan.mode !== "summarize") s += " You are the last to speak before the owner, so finish by handing back to them, with a question if one is open.";
+  return s;
+}
+function agentPrompt(a, plan, handback) {
+  const others = AGENTS.filter(x => x.id !== a.id).map(x => x.name).join(", ");
+  const web = a.id === "research"
+    ? "Web search: you cannot search inside this reply. A separate tool runs your searches and posts results into the transcript as a WEB SEARCH NOTE. " + searchLine() + " Never invent findings, numbers or sources. If a search is running, say you are on it and that results will follow."
+    : "You cannot browse the internet. If live facts are needed (competitor sites, current fees, regulations), ask Research by name to search, and say what you know is from memory.";
+  return [
+    "You are " + a.name + " in a live voice meeting called \"" + TITLE + "\". " + a.p,
+    "Also in the meeting: the shop owner (address them as \"you\") and your colleagues " + others + ". Everyone hears everything.",
+    "The owner's brief:\n" + S.brief.slice(0, 3000),
+    "Rules you never break:\n" +
+    "- Never make up facts about the shop: what it sells, prices, customers, opening hours, history, staff. You only know what the brief and the owner have said. If you need a fact, ask the owner instead of assuming.\n" +
+    "- This is speech. Say 1 to 3 short sentences. No lists, no markdown, no headings, no emoji, no stage directions.\n" +
+    "- Sound like a person in a meeting: use colleagues' names, hold a real opinion, do not repeat what was already said, do not introduce yourself.\n" +
+    "- " + web,
+    "Transcript so far (latest last):\n" + tail(40),
+    "Your move now: " + modeLine(a, plan, handback),
+    "Reply with only the words " + a.name + " says out loud.",
+  ].join("\n\n");
+}
+function clean(a, text) {
+  let s = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/[*_#`>]+/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/\s*\n+\s*/g, " ").trim();
+  s = s.replace(new RegExp("^\\s*\\(?" + a.name + "\\)?\\s*[:\\-–—]\\s*", "i"), "").replace(/^["“]|["”]$/g, "").trim();
+  return s;
+}
+const COPY = {
+  not_granted: "Claude isn't allowed on this page, so the team can't reply. Allow it in the artifact's Permissions menu and reload.",
+  sampling_disabled: "Claude isn't available for this account, so the team can't reply.",
+  rate_limited: "Claude is rate limited right now. Wait a little, then speak or press Let them continue.",
+  session_expired: "Your Claude session expired. Sign in again and reload this page.",
+  refused: "Claude declined that one. Try saying it another way.",
+  prompt_too_large: "The call record is too long for one reply. Start a fresh call from the drawer.",
+};
+const copyFor = c => COPY[c] || "The team lost its connection for a moment. Speak again or press Let them continue.";
+
+/* ---------- director + speaker generation ---------- */
+function fallbackPlan() {
+  const last = lastSpeaker();
+  if (!S.log.length) return {speaker: "strategy", mode: "ask_owner"};
+  const pool = AGENTS.filter(a => a.id !== last);
+  return {speaker: pool[Math.floor(Math.random() * pool.length)].id, mode: last ? "build" : "answer", target: last};
+}
+async function direct(sm, remaining) {
+  let j;
+  try { j = await sm.json(directorPrompt(remaining), {modelTier: "quick", cache: false, signal: ctl.signal}); }
+  catch (e) {
+    const c = e && e.code;
+    if (c === "invalid_json" || c === "upstream_error" || c === "empty_completion" || c === "refused") return fallbackPlan();
+    throw e;
+  }
+  if (!j || typeof j !== "object" || !BY[j.speaker]) return fallbackPlan();
+  const last = lastSpeaker(), lastEntry = S.log[S.log.length - 1];
+  const plan = {speaker: j.speaker, mode: MODES.includes(j.mode) ? j.mode : "answer", target: BY[j.target] ? j.target : last,
+    hands: Array.isArray(j.hands) ? j.hands.filter(h => BY[h]).slice(0, 3) : [],
+    search: typeof j.search === "string" && j.search.trim().length > 3 ? j.search.trim().slice(0, 200) : null, handback: j.handback === true};
+  if (lastEntry && plan.speaker === lastEntry.who) plan.speaker = (plan.hands.find(h => h !== lastEntry.who)) || fallbackPlan().speaker;
+  if (plan.mode === "interrupt" && !(lastEntry && BY[lastEntry.who])) plan.mode = "answer";
+  if (plan.mode === "interrupt") plan.target = lastEntry.who;
+  return plan;
+}
+async function prepare(ep, forced, remaining) {
+  try {
+    const sm = await P.sample;
+    if (ep !== epoch) return null;
+    if (!sm) return {error: "The team can only reply when this page is open in claude.ai."};
+    let plan;
+    if (research.pending) plan = {speaker: "research", mode: research.pending, clears: true};
+    else if (forced) plan = {speaker: forced, mode: "answer"};
+    else plan = await direct(sm, remaining);
+    if (ep !== epoch) return null;
+    const a = BY[plan.speaker];
+    if (plan.search && search.state !== "running" && !search.unavailable) startSearch(plan.search);
+    hands = new Set((plan.hands || []).filter(h => h !== a.id && h !== speaking));
+    if (plan.mode !== "interrupt") hands.add(a.id);
+    if (research.pending && a.id !== "research") hands.add("research");
+    thinking = a.id; renderTiles(); setStatus();
+    const handback = plan.mode === "ask_owner" || plan.handback === true || remaining <= 1;
+    const r = await sm(agentPrompt(a, plan, handback), {modelTier: "quick", cache: false, signal: ctl.signal});
+    if (ep !== epoch) return null;
+    const text = clean(a, r.text);
+    const lines = splitLines(text);
+    if (!lines.length) return {error: copyFor("empty_completion")};
+    return {a, mode: plan.mode, text: lines.join(" "), lines, handback, clears: !!plan.clears};
+  } catch (e) {
+    if (ep !== epoch || (e && e.code === "cancelled")) return null;
+    return {error: copyFor(e && e.code)};
+  }
+}
+async function run(forced) {
+  const ep = epoch; let failed = false;
+  busy = true; setStatus();
+  let turn = await prepare(ep, forced, turnsLeft);
+  while (turn && ep === epoch && !left) {
+    if (turn.error) { toast(turn.error, 12000); failed = true; break; }
+    turnsLeft--;
+    const entry = addEntry({who: turn.a.id, text: turn.text});
+    if (turn.clears) research.pending = null;
+    hands.delete(turn.a.id); thinking = null; speaking = turn.a.id; renderTiles(); setStatus();
+    const nextP = turnsLeft > 0 && !turn.handback ? prepare(ep, null, turnsLeft) : null;
+    const cur = turn;
+    if (nextP) nextP.then(n => { if (n && !n.error && n.mode === "interrupt" && ep === epoch) requestCut(cur); });
+    const r = await playTurn(cur);
+    if (r.interrupted) {
+      if (r.count < cur.lines.length) entry.text = cur.lines.slice(0, Math.max(1, r.count)).join(" ") + " —";
+      entry.cut = true; save(); renderLog();
+    }
+    if (ep !== epoch) return;
+    speaking = null; renderTiles();
+    turn = nextP ? await nextP : null;
+  }
+  if (ep !== epoch) return;
+  busy = false; speaking = null; thinking = null; hands = new Set();
+  if (research.pending) hands.add("research");
+  caption(null, ""); renderTiles(); setStatus();
+  if (research.pending && !failed && !left) { turnsLeft = Math.min(3, S.len); run(); }
+}
+
+/* ---------- the owner speaks ---------- */
+function parseAddress(text) {
+  const t = text.trim();
+  if (/^(ok(ay)?[, ]+|hey[, ]+|so[, ]+)?(everyone|everybody|team|all of you|guys)\b/i.test(t)) return {everyone: true};
+  for (const a of AGENTS) for (const al of a.al) {
+    const m = t.match(new RegExp("^(?:ok(?:ay)?[, ]+|hey[, ]+|so[, ]+|and[, ]+)?(?:" + al + ")(?=[\\s,:;.!?\\-–—]|$)[\\s,:;.!\\-–—]*", "i"));
+    if (m) return {agent: a.id, rest: t.slice(m[0].length)};
+  }
+  return {};
+}
+function searchQuery(rest) {
+  const m = String(rest || "").match(/\b(?:search(?: the (?:web|internet))?|look up|google|find out)\b\s*(?:for|about|on|up)?\s*(.{4,})/i);
+  return m ? m[1].replace(/[.?!]+$/, "").trim().slice(0, 200) : null;
+}
+function handleUser(text) {
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text || left) return;
+  interruptAll();
+  addEntry({who: "you", text});
+  const ad = parseAddress(text);
+  let forced = ad.everyone ? null : ad.agent || target;
+  target = null;
+  if (forced === "research") { const q = searchQuery(ad.agent ? ad.rest : text); if (q) startSearch(q); }
+  turnsLeft = S.len;
+  renderTiles();
+  run(forced);
+}
+
+/* ---------- speech in ---------- */
+function liveCaption() { if (L) caption("you", (L.finals + " " + L.partial).trim() || "Listening…"); }
+function bump() {
+  if (!L || L.ending) return;
+  clearTimeout(L.timer);
+  if (!L.ptt && (L.finals + L.partial).trim()) L.timer = setTimeout(() => finishListening(true), 1500);
+}
+function startListening(ptt) {
+  if (left) return;
+  if (!dict || micDenied) { openDrawer(true); return; }
+  if (L) return;
+  const pr = dict.start();
+  interruptAll();
+  const me = L = {ptt, finals: "", partial: "", timer: 0, ending: false};
+  renderTiles(); setStatus(); liveCaption();
+  pr.catch(e => {
+    if (L !== me || me.ending) return;
+    clearTimeout(me.timer); L = null; caption(null, ""); renderTiles(); setStatus();
+    const c = e && e.code;
+    if (c === "not_granted" || c === "unavailable") { micDenied = true; renderControls(); toast("The mic isn't available here. Type to the team instead."); openDrawer(true); }
+    else if (c === "rate_limited") toast("Dictation is busy. Try the mic again in a moment.");
+    else if (c !== "stopped" && c !== "dismissed") toast("The mic didn't start. Tap it again.");
+  });
+}
+function takeHeard(me, send) {
+  clearTimeout(me.timer);
+  if (L === me) L = null;
+  const text = (me.finals.trim() || me.partial.trim());
+  renderTiles(); setStatus();
+  if (send && text) handleUser(text); else caption(null, "");
+}
+async function finishListening(send) {
+  if (!L || L.ending) return;
+  const me = L; me.ending = true; clearTimeout(me.timer);
+  try { await dict.stop(); } catch {}
+  takeHeard(me, send);
+}
+
+/* ---------- live web search through Claude Code Remote ---------- */
+function findSessionId(v) {
+  let hit = null;
+  (function walk(x, k) {
+    if (hit || x == null) return;
+    if (typeof x === "string") { if (/^session_[A-Za-z0-9]+$/.test(x) && (!k || /id$/i.test(k))) hit = x; return; }
+    if (typeof x === "object") for (const key of Object.keys(x)) walk(x[key], key);
+  })(v, "");
+  if (!hit && typeof v === "string") { const m = v.match(/session_[A-Za-z0-9]+/); if (m) hit = m[0]; }
+  return hit;
+}
+function findResult(v) {
+  const out = {text: "", error: false};
+  (function walk(x) {
+    if (x == null || typeof x !== "object") return;
+    if (Array.isArray(x)) return x.forEach(walk);
+    if (x.is_error === true || (typeof x.subtype === "string" && /^error/.test(x.subtype))) out.error = true;
+    if (typeof x.result === "string" && x.result.trim()) out.text = x.result.trim();
+    for (const key of Object.keys(x)) walk(x[key]);
+  })(v);
+  return out;
+}
+const SEARCH_FAIL = {
+  no_mcp: "the Claude Code Remote connector isn't available in this view",
+  server_not_connected: "the Claude Code Remote connector isn't connected; add it in claude.ai Settings → Connectors",
+  needs_reauth: "the Claude Code Remote connector needs reconnecting in claude.ai Settings → Connectors",
+  not_in_manifest: "the Claude Code Remote connector isn't allowed for this page",
+  not_granted: "connector access wasn't granted for this page",
+  blocked_by_policy: "your organisation blocks that connector tool",
+  approval_required: "the search needed your approval and didn't get it",
+  no_env: "no cloud environment was found to run the search in",
+  no_session: "the research session didn't start",
+  session_error: "the research session ended with an error",
+  timeout: "the search took longer than six minutes",
+};
+const UNAVAILABLE = ["no_mcp", "server_not_connected", "needs_reauth", "not_in_manifest", "not_granted", "blocked_by_policy", "capability_disabled", "capability_removed", "selection_required", "no_env"];
+function kick() {
+  if (left) return;
+  if (research.pending) hands.add("research");
+  renderTiles();
+  if (research.pending && !busy && !L) { turnsLeft = Math.min(3, S.len); run(); }
+}
+async function startSearch(q) {
+  if (search.state === "running" || left) return;
+  const tok = ++search.tok;
+  search.state = "running"; search.q = q; search.fail = ""; renderTiles();
+  let sid = null, m = null;
+  try {
+    m = await P.mcp;
+    if (!m) throw {code: "no_mcp"};
+    const envs = (await m.callTool(SERVER, "list_environments", {limit: 100}, {cache: false})).payload;
+    const list = (envs && Array.isArray(envs.environments) ? envs.environments : []).filter(e => e && e.environment_id);
+    const nm = e => String(e.name || "");
+    const env = list.find(e => /rayyan/i.test(nm(e))) || list.find(e => /^default$/i.test(nm(e).trim())) || list.find(e => /default/i.test(nm(e)));
+    if (!env) throw {code: "no_env"};
+    if (tok !== search.tok) return;
+    const prompt = "Do web research only. Do not create, edit or delete any files, do not run git, and do not ask me questions.\n\n" +
+      "Research question: " + q + "\n\n" +
+      "Context: a shop owner in Qatar is planning a website for a shop called New Rayyan Trading on Al Shafi Street. Search the web for current, specific information that answers the question. Do not guess facts about that shop.\n\n" +
+      "End your final message with up to 6 bullet findings, each naming its source, 150 words maximum in total. If you cannot search the web, say so in one line.";
+    const made = (await m.callTool(SERVER, "create_session", {environment_id: env.environment_id, title: "Meeting research: " + q.slice(0, 60), prompt, extra_allowed_tools: ["WebSearch", "WebFetch"]})).payload;
+    sid = findSessionId(made);
+    if (!sid) throw {code: "no_session"};
+    let found = "";
+    for (let i = 0; i < 36 && !found; i++) {
+      await sleep(10000);
+      if (tok !== search.tok) return;
+      let ev;
+      try { ev = (await m.callTool(SERVER, "list_events", {session_id: sid, kinds: ["result"], limit: 100}, {cache: false})).payload; }
+      catch (e) { if (e && e.retryable) continue; throw e; }
+      const r = findResult(ev);
+      if (r.text) found = r.text; else if (r.error) throw {code: "session_error"};
+    }
+    if (tok !== search.tok) return;
+    if (!found) throw {code: "timeout"};
+    addEntry({who: "note", text: "Findings for “" + q + "”\n" + found.slice(0, 1800)});
+    research.pending = "report";
+  } catch (e) {
+    if (tok !== search.tok) return;
+    const c = (e && e.code) || "upstream_error";
+    if (UNAVAILABLE.includes(c)) search.unavailable = true;
+    search.fail = SEARCH_FAIL[c] || "the connector didn't answer";
+    addEntry({who: "note", text: "Search for “" + q + "” failed: " + search.fail + "."});
+    research.pending = "search_failed";
+  } finally {
+    if (sid && m) m.callTool(SERVER, "archive_session", {session_id: sid}).catch(() => {});
+    if (tok === search.tok) { search.state = "idle"; kick(); }
+  }
+}
+
+/* ---------- controls ---------- */
+function freshCall() {
+  interruptAll();
+  search.tok++; search.state = "idle"; research.pending = null; hands = new Set(); target = null; turnsLeft = 0;
+  S.log = []; save(); renderLog(); renderTiles(); setStatus();
+}
+let freshArmed = 0;
+$("bFresh").onclick = e => {
+  const b = e.currentTarget;
+  if (!freshArmed) { b.textContent = "Tap again to clear the record"; freshArmed = setTimeout(() => { freshArmed = 0; b.textContent = "Start a fresh call"; }, 4000); return; }
+  clearTimeout(freshArmed); freshArmed = 0; b.textContent = "Start a fresh call"; freshCall(); toast("Fresh call started.", 3000);
+};
+$("bMic").onclick = () => { if (L) finishListening(true); else startListening(false); };
+$("bAudio").onclick = () => {
+  if (!tts || ttsOff) { toast("Voices aren't available in this browser, so the team's replies show as captions."); return; }
+  S.audio = !S.audio; save(); renderControls();
+  if (!S.audio) tts.stop().catch(() => {});
+};
+$("bCap").onclick = () => { S.captions = !S.captions; save(); renderControls(); if (!S.captions && !L) $("cap").hidden = !(!tts || ttsOff || !S.audio) || !$("capLine").textContent; };
+$("bGo").onclick = () => {
+  if (left || L) return;
+  if (busy) { turnsLeft += S.len; setStatus(); toast("They'll keep going for " + S.len + " more turns.", 3000); return; }
+  turnsLeft = S.len; run();
+};
+$("bRec").onclick = () => openDrawer(false);
+$("bClose").onclick = closeDrawer; $("scrim").onclick = closeDrawer;
+$("bLeave").onclick = () => { interruptAll(); if (L) finishListening(false); search.tok++; search.state = "idle"; left = true; closeDrawer(); $("gone").hidden = false; setStatus(); renderTiles(); };
+$("bRejoin").onclick = () => { left = false; $("gone").hidden = true; setStatus(); };
+$("bFresh2").onclick = () => { left = false; $("gone").hidden = true; freshCall(); };
+$("form").onsubmit = e => { e.preventDefault(); const v = $("say").value; $("say").value = ""; handleUser(v); };
+$("brief").value = S.brief;
+$("brief").oninput = e => { S.brief = e.target.value; save(); };
+$("seg").onclick = e => { const n = Number(e.target.dataset && e.target.dataset.n); if (n) { S.len = n; save(); renderControls(); } };
+
+const typing = el => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("drawer").classList.contains("open")) { e.preventDefault(); closeDrawer(); return; }
+  if (e.code !== "Space" || typing(e.target) || left || !dict || micDenied) return;
+  e.preventDefault();
+  if (e.repeat || pttDown) return;
+  pttDown = true;
+  if (!L) startListening(true); else L.ptt = true;
+});
+addEventListener("keyup", e => {
+  if (e.code !== "Space" || !pttDown) return;
+  e.preventDefault(); pttDown = false; finishListening(true);
+});
+
+/* ---------- boot ---------- */
+buildTiles(); renderTiles(); renderControls(); renderLog(); setStatus();
+const tick = () => { $("clock").textContent = hhmm(Date.now()); }; tick(); setInterval(tick, 20000);
+if (!S.log.length) toast("Tap the mic and talk. Say a name first, like “SEO, …”, to ask one person.", 12000);
+
+P.tts.then(t => { tts = t; if (t) { try { t.onLine(onTtsLine); } catch {} } renderControls(); });
+P.dict.then(d => {
+  dict = d;
+  if (!d) return;
+  d.onPartial(e => { if (!L || L.ending) return; L.partial = e.text || ""; liveCaption(); bump(); });
+  d.onFinal(e => { if (!L) return; L.finals += e.text || ""; L.partial = ""; if (!L.ending) { liveCaption(); bump(); } });
+  d.onState(e => { if (e.state === "idle" && L && !L.ending) takeHeard(L, true); });
+});
+Promise.all([P.tts, P.dict, P.sample]).then(([t, d, s]) => {
+  capsKnown = true; renderControls(); setStatus();
+  if (!s) toast("Open this page in claude.ai so the team can reply.", 12000);
+  else if (!d) toast("Voice input isn't available in this browser or app. Open the call record to type; replies show as captions" + (t ? " and are spoken." : "."), 12000);
+});
+})();
+</script>
