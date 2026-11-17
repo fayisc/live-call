@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>New Rayyan Team Call</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+Arabic:wght@400;500&display=swap">
 <style>
 /* Layout: one-screen call app. Header strip, 12-tile grid that fills the stage, captions floating over the grid, control bar pinned below, record drawer sliding in from the right. Single dark look by choice (a video-call room). */
@@ -11,8 +15,9 @@
   --font:"Roboto","Noto Sans Arabic",system-ui,-apple-system,"Segoe UI",sans-serif;
   --r:12px;
 }
+[hidden]{display:none!important}
 html,body{height:100%}
-body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.45;overflow:hidden}
+body{margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.45;overflow:hidden}
 button,input,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -82,7 +87,7 @@ button.tile:hover{background:var(--tile-hi)}
 .x:hover{background:var(--tile)}
 .db{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:18px;min-height:0}
 .db label,.db h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:0 0 6px;display:block}
-textarea,input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;resize:vertical}
+textarea,input[type=text],input[type=password]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;resize:vertical}
 .hint{color:var(--muted);font-size:12px;margin:6px 0 0}
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{flex:1;padding:8px 4px;font-size:13px}
@@ -109,7 +114,10 @@ textarea,input[type=text]{width:100%;background:var(--bg);border:1px solid var(-
 .gone div{display:flex;flex-direction:column;gap:12px;max-width:320px}
 .gone h2{font-weight:400;font-size:24px;margin:0 0 8px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+*{box-sizing:border-box}
 </style>
+</head>
+<body>
 
 <div class="app">
   <header class="top">
@@ -145,6 +153,11 @@ textarea,input[type=text]{width:100%;background:var(--bg);border:1px solid var(-
       <label for="brief">Project brief</label>
       <textarea id="brief" rows="5"></textarea>
       <p class="hint">The team only uses shop facts written here or said in the call. They ask you for anything else.</p>
+    </section>
+    <section>
+      <label for="key">Anthropic API key</label>
+      <input type="password" id="key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+      <p class="hint">The team runs on your own Claude API key. It is saved only in this browser and sent only to api.anthropic.com. Use a key with a spend limit.</p>
     </section>
     <section>
       <h3>Discussion length after you speak</h3>
@@ -215,9 +228,127 @@ if (!Array.isArray(S.log)) S.log = [];
 if (![3, 6, 12].includes(S.len)) S.len = 6;
 const save = () => { try { if (S.log.length > 400) S.log = S.log.slice(-400); localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
 
-/* ---------- capabilities ---------- */
-const use = n => (window.claude && window.claude.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null));
-const P = {sample: use("sample"), tts: use("tts"), dict: use("dictation"), mcp: use("mcp")};
+/* ---------- Claude API (called straight from the browser with the owner's key) ---------- */
+const FAST_MODEL = "claude-haiku-5-5", SEARCH_MODEL = "claude-sonnet-5-5";
+const KEYK = "nrt-anthropic-key";
+let apiKey = "";
+try { apiKey = localStorage.getItem(KEYK) || ""; } catch {}
+async function api(body, signal, beta) {
+  if (!apiKey) throw {code: "no_key"};
+  const headers = {"content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"};
+  if (beta) headers["anthropic-beta"] = beta;
+  let r;
+  try { r = await fetch("https://api.anthropic.com/v1/messages", {method: "POST", signal, headers, body: JSON.stringify(body)}); }
+  catch { throw {code: signal && signal.aborted ? "cancelled" : "upstream_error"}; }
+  if (!r.ok) {
+    let msg = "";
+    try { msg = ((await r.json()).error || {}).message || ""; } catch {}
+    if (r.status === 401 || r.status === 403) throw {code: "bad_key", message: msg};
+    if (r.status === 429) throw {code: "rate_limited", message: msg};
+    if (r.status === 413) throw {code: "prompt_too_large", message: msg};
+    if (r.status >= 500) throw {code: "upstream_error", message: msg};
+    throw {code: "api_error", message: msg || "HTTP " + r.status};
+  }
+  return r.json();
+}
+const textOf = m => (m.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+async function sample(prompt, o) {
+  const m = await api({model: FAST_MODEL, max_tokens: 400, thinking: {type: "disabled"}, messages: [{role: "user", content: prompt}]}, o && o.signal);
+  if (m.stop_reason === "refusal") throw {code: "refused"};
+  const text = textOf(m);
+  if (!text) throw {code: "empty_completion"};
+  return {text};
+}
+sample.json = async (prompt, o) => {
+  const {text} = await sample(prompt, o);
+  try { return JSON.parse(text); } catch {}
+  const i = text.indexOf("{"), j = text.lastIndexOf("}");
+  if (i >= 0 && j > i) { try { return JSON.parse(text.slice(i, j + 1)); } catch {} }
+  throw {code: "invalid_json"};
+};
+
+/* ---------- browser voices ---------- */
+const synth = window.speechSynthesis || null;
+const PITCH = [1.25, 1, 0.9, 1.1, 1.3, 0.85, 1.05, 0.95, 1.15, 0.8, 1];
+const TTS = synth && window.SpeechSynthesisUtterance ? (() => {
+  let tok = 0, lineH = () => {}, rejCur = null, keep = [];
+  const pick = l => {
+    const ar = /[؀-ۿ]/.test(l.text);
+    const pool = synth.getVoices().filter(v => v.lang.toLowerCase().startsWith(ar ? "ar" : "en"));
+    return {ar, voice: pool.length ? pool[l.vi % pool.length] : null};
+  };
+  try { synth.getVoices(); } catch {}
+  return {
+    onLine(f) { lineH = f; },
+    speak(lines) {
+      const me = ++tok;
+      if (rejCur) { rejCur({code: "stopped", reason: "replaced"}); rejCur = null; }
+      synth.cancel();
+      return new Promise((res, rej) => {
+        rejCur = rej;
+        let leftN = lines.length;
+        const done = () => { if (me === tok && --leftN <= 0) { rejCur = null; res({}); } };
+        setTimeout(() => {
+          if (me !== tok) return;
+          keep = lines.map(l => {
+            const u = new SpeechSynthesisUtterance(l.text), v = pick(l);
+            if (v.voice) u.voice = v.voice;
+            u.lang = v.voice ? v.voice.lang : v.ar ? "ar" : "en-US";
+            u.rate = l.rate || 1; u.pitch = l.pitch || 1;
+            u.onstart = () => { if (me === tok) lineH({id: l.id}); };
+            u.onend = done;
+            u.onerror = e => {
+              if (me !== tok) return;
+              if (e.error === "not-allowed") { tok++; rejCur = null; synth.cancel(); rej({code: "no_gesture"}); } else done();
+            };
+            synth.speak(u);
+            return u;
+          });
+        }, 60);
+      });
+    },
+    stop() { tok++; synth.cancel(); if (rejCur) { rejCur({code: "stopped", reason: "stopped"}); rejCur = null; } return Promise.resolve(); },
+  };
+})() : null;
+
+/* ---------- browser dictation ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const DICT = SR ? (() => {
+  let rec = null, hP = () => {}, hF = () => {}, hS = () => {}, stopRes = null;
+  return {
+    onPartial(f) { hP = f; }, onFinal(f) { hF = f; }, onState(f) { hS = f; },
+    start() {
+      return new Promise((res, rej) => {
+        try {
+          const me = rec = new SR(); let started = false;
+          me.continuous = true; me.interimResults = true; me.lang = navigator.language || "en-US";
+          me.onstart = () => { started = true; res(); };
+          me.onresult = e => {
+            let interim = "";
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+              const r = e.results[i];
+              if (r.isFinal) hF({text: " " + r[0].transcript.trim()}); else interim += r[0].transcript;
+            }
+            hP({text: interim});
+          };
+          me.onerror = e => { if (!started) rej({code: e.error === "not-allowed" || e.error === "service-not-allowed" ? "not_granted" : "upstream_error"}); };
+          me.onend = () => {
+            if (rec === me) rec = null;
+            if (!started) rej({code: "stopped"});
+            if (stopRes) { const r = stopRes; stopRes = null; r(); } else hS({state: "idle"});
+          };
+          me.start();
+        } catch { rec = null; rej({code: "upstream_error"}); }
+      });
+    },
+    stop() {
+      if (!rec) return Promise.resolve();
+      return new Promise(r => { stopRes = r; try { rec.stop(); } catch { stopRes = null; r(); } setTimeout(r, 1500); });
+    },
+  };
+})() : null;
+
+const P = {sample: Promise.resolve(sample), tts: Promise.resolve(TTS), dict: Promise.resolve(DICT)};
 let tts = null, dict = null, ttsOff = false, micDenied = false, capsKnown = false;
 
 /* ---------- meeting state ---------- */
@@ -363,7 +494,7 @@ function playTurn(turn) {
     if (tts && S.audio && !ttsOff) {
       p.mode = "tts";
       caption(turn.a.id, turn.lines[0]);
-      tts.speak(turn.lines.map((text, i) => ({text, voice: turn.a.voice, rate: turn.a.rate, id: p.tok + ":" + i})))
+      tts.speak(turn.lines.map((text, i) => ({text, rate: turn.a.rate, vi: AGENTS.indexOf(turn.a), pitch: PITCH[AGENTS.indexOf(turn.a)], id: p.tok + ":" + i})))
         .then(() => p.finish(false, turn.lines.length), e => {
           if (p.done) return;
           const c = e && e.code;
@@ -482,10 +613,9 @@ function clean(a, text) {
   return s;
 }
 const COPY = {
-  not_granted: "Claude isn't allowed on this page, so the team can't reply. Allow it in the artifact's Permissions menu and reload.",
-  sampling_disabled: "Claude isn't available for this account, so the team can't reply.",
+  no_key: "Add your Anthropic API key in the call record so the team can reply.",
+  bad_key: "Claude rejected that API key. Check it in the call record.",
   rate_limited: "Claude is rate limited right now. Wait a little, then speak or press Let them continue.",
-  session_expired: "Your Claude session expired. Sign in again and reload this page.",
   refused: "Claude declined that one. Try saying it another way.",
   prompt_too_large: "The call record is too long for one reply. Start a fresh call from the drawer.",
 };
@@ -520,7 +650,6 @@ async function prepare(ep, forced, remaining) {
   try {
     const sm = await P.sample;
     if (ep !== epoch) return null;
-    if (!sm) return {error: "The team can only reply when this page is open in claude.ai."};
     let plan;
     if (research.pending) plan = {speaker: "research", mode: research.pending, clears: true};
     else if (forced) plan = {speaker: forced, mode: "answer"};
@@ -541,7 +670,8 @@ async function prepare(ep, forced, remaining) {
     return {a, mode: plan.mode, text: lines.join(" "), lines, handback, clears: !!plan.clears};
   } catch (e) {
     if (ep !== epoch || (e && e.code === "cancelled")) return null;
-    return {error: copyFor(e && e.code)};
+    if (e && (e.code === "no_key" || e.code === "bad_key")) { openDrawer(false); setTimeout(() => $("key").focus(), 220); }
+    return {error: e && e.code === "api_error" ? "The Claude API said: " + e.message : copyFor(e && e.code)};
   }
 }
 async function run(forced) {
@@ -639,42 +769,14 @@ async function finishListening(send) {
   takeHeard(me, send);
 }
 
-/* ---------- live web search through Claude Code Remote ---------- */
-function findSessionId(v) {
-  let hit = null;
-  (function walk(x, k) {
-    if (hit || x == null) return;
-    if (typeof x === "string") { if (/^session_[A-Za-z0-9]+$/.test(x) && (!k || /id$/i.test(k))) hit = x; return; }
-    if (typeof x === "object") for (const key of Object.keys(x)) walk(x[key], key);
-  })(v, "");
-  if (!hit && typeof v === "string") { const m = v.match(/session_[A-Za-z0-9]+/); if (m) hit = m[0]; }
-  return hit;
-}
-function findResult(v) {
-  const out = {text: "", error: false};
-  (function walk(x) {
-    if (x == null || typeof x !== "object") return;
-    if (Array.isArray(x)) return x.forEach(walk);
-    if (x.is_error === true || (typeof x.subtype === "string" && /^error/.test(x.subtype))) out.error = true;
-    if (typeof x.result === "string" && x.result.trim()) out.text = x.result.trim();
-    for (const key of Object.keys(x)) walk(x[key]);
-  })(v);
-  return out;
-}
+/* ---------- live web search (Claude's web search tool) ---------- */
 const SEARCH_FAIL = {
-  no_mcp: "the Claude Code Remote connector isn't available in this view",
-  server_not_connected: "the Claude Code Remote connector isn't connected; add it in claude.ai Settings → Connectors",
-  needs_reauth: "the Claude Code Remote connector needs reconnecting in claude.ai Settings → Connectors",
-  not_in_manifest: "the Claude Code Remote connector isn't allowed for this page",
-  not_granted: "connector access wasn't granted for this page",
-  blocked_by_policy: "your organisation blocks that connector tool",
-  approval_required: "the search needed your approval and didn't get it",
-  no_env: "no cloud environment was found to run the search in",
-  no_session: "the research session didn't start",
-  session_error: "the research session ended with an error",
-  timeout: "the search took longer than six minutes",
+  no_key: "there is no API key yet",
+  bad_key: "the API key was rejected",
+  rate_limited: "the API is rate limited right now",
+  refused: "the search request was declined",
+  empty: "the search came back with nothing",
 };
-const UNAVAILABLE = ["no_mcp", "server_not_connected", "needs_reauth", "not_in_manifest", "not_granted", "blocked_by_policy", "capability_disabled", "capability_removed", "selection_required", "no_env"];
 function kick() {
   if (left) return;
   if (research.pending) hands.add("research");
@@ -685,46 +787,34 @@ async function startSearch(q) {
   if (search.state === "running" || left) return;
   const tok = ++search.tok;
   search.state = "running"; search.q = q; search.fail = ""; renderTiles();
-  let sid = null, m = null;
   try {
-    m = await P.mcp;
-    if (!m) throw {code: "no_mcp"};
-    const envs = (await m.callTool(SERVER, "list_environments", {limit: 100}, {cache: false})).payload;
-    const list = (envs && Array.isArray(envs.environments) ? envs.environments : []).filter(e => e && e.environment_id);
-    const nm = e => String(e.name || "");
-    const env = list.find(e => /rayyan/i.test(nm(e))) || list.find(e => /^default$/i.test(nm(e).trim())) || list.find(e => /default/i.test(nm(e)));
-    if (!env) throw {code: "no_env"};
-    if (tok !== search.tok) return;
-    const prompt = "Do web research only. Do not create, edit or delete any files, do not run git, and do not ask me questions.\n\n" +
-      "Research question: " + q + "\n\n" +
+    const prompt = "Research question: " + q + "\n\n" +
       "Context: a shop owner in Qatar is planning a website for a shop called New Rayyan Trading on Al Shafi Street. Search the web for current, specific information that answers the question. Do not guess facts about that shop.\n\n" +
-      "End your final message with up to 6 bullet findings, each naming its source, 150 words maximum in total. If you cannot search the web, say so in one line.";
-    const made = (await m.callTool(SERVER, "create_session", {environment_id: env.environment_id, title: "Meeting research: " + q.slice(0, 60), prompt, extra_allowed_tools: ["WebSearch", "WebFetch"]})).payload;
-    sid = findSessionId(made);
-    if (!sid) throw {code: "no_session"};
-    let found = "";
-    for (let i = 0; i < 36 && !found; i++) {
-      await sleep(10000);
+      "Reply with up to 6 bullet findings, each naming its source, 150 words maximum in total, and nothing else. If the search finds nothing useful, say so in one line.";
+    const messages = [{role: "user", content: prompt}];
+    let m;
+    for (let i = 0; i < 4; i++) {
+      m = await api({model: SEARCH_MODEL, max_tokens: 2000, fallbacks: "default", tools: [{type: "web_search_20260209", name: "web_search", max_uses: 4}], messages}, null, "server-side-fallback-2026-07-01");
       if (tok !== search.tok) return;
-      let ev;
-      try { ev = (await m.callTool(SERVER, "list_events", {session_id: sid, kinds: ["result"], limit: 100}, {cache: false})).payload; }
-      catch (e) { if (e && e.retryable) continue; throw e; }
-      const r = findResult(ev);
-      if (r.text) found = r.text; else if (r.error) throw {code: "session_error"};
+      if (m.stop_reason !== "pause_turn") break;
+      messages[1] = {role: "assistant", content: m.content};
     }
-    if (tok !== search.tok) return;
-    if (!found) throw {code: "timeout"};
+    if (m.stop_reason === "refusal") throw {code: "refused"};
+    const blocks = m.content || [];
+    let lastTool = -1;
+    blocks.forEach((b, i) => { if (b.type !== "text") lastTool = i; });
+    const found = blocks.slice(lastTool + 1).filter(b => b.type === "text").map(b => b.text).join("").trim() || textOf(m);
+    if (!found) throw {code: "empty"};
     addEntry({who: "note", text: "Findings for “" + q + "”\n" + found.slice(0, 1800)});
     research.pending = "report";
   } catch (e) {
     if (tok !== search.tok) return;
     const c = (e && e.code) || "upstream_error";
-    if (UNAVAILABLE.includes(c)) search.unavailable = true;
-    search.fail = SEARCH_FAIL[c] || "the connector didn't answer";
+    if (c === "api_error") search.unavailable = true;
+    search.fail = c === "api_error" ? "the API said: " + e.message : SEARCH_FAIL[c] || "the search service didn't answer";
     addEntry({who: "note", text: "Search for “" + q + "” failed: " + search.fail + "."});
     research.pending = "search_failed";
   } finally {
-    if (sid && m) m.callTool(SERVER, "archive_session", {session_id: sid}).catch(() => {});
     if (tok === search.tok) { search.state = "idle"; kick(); }
   }
 }
@@ -759,6 +849,8 @@ $("bLeave").onclick = () => { interruptAll(); if (L) finishListening(false); sea
 $("bRejoin").onclick = () => { left = false; $("gone").hidden = true; setStatus(); };
 $("bFresh2").onclick = () => { left = false; $("gone").hidden = true; freshCall(); };
 $("form").onsubmit = e => { e.preventDefault(); const v = $("say").value; $("say").value = ""; handleUser(v); };
+$("key").value = apiKey;
+$("key").oninput = e => { apiKey = e.target.value.trim(); try { localStorage.setItem(KEYK, apiKey); } catch {} };
 $("brief").value = S.brief;
 $("brief").oninput = e => { S.brief = e.target.value; save(); };
 $("seg").onclick = e => { const n = Number(e.target.dataset && e.target.dataset.n); if (n) { S.len = n; save(); renderControls(); } };
@@ -792,8 +884,10 @@ P.dict.then(d => {
 });
 Promise.all([P.tts, P.dict, P.sample]).then(([t, d, s]) => {
   capsKnown = true; renderControls(); setStatus();
-  if (!s) toast("Open this page in claude.ai so the team can reply.", 12000);
+  if (!apiKey) { toast("Add your Anthropic API key in the call record to start the meeting.", 12000); openDrawer(false); }
   else if (!d) toast("Voice input isn't available in this browser or app. Open the call record to type; replies show as captions" + (t ? " and are spoken." : "."), 12000);
 });
 })();
 </script>
+</body>
+</html>
